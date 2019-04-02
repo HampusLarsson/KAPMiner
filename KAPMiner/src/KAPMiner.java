@@ -14,7 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-
+//Jag har lagt till en kommentar
 /**
  * Created by isak on 2017-04-21.
  */
