@@ -34,5 +34,6 @@
         <SOURCES />
       </library>
     </orderEntry>
+    <orderEntry type="library" exported="" name="KAPMinerjars" level="project" />
   </component>
 </module>
