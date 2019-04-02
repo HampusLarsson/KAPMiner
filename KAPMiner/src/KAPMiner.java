@@ -307,7 +307,7 @@ public class KAPMiner {
         }
     }
 
-    public static synchronized BitSet intersection(BitSet a, BitSet b) {
+    public static  BitSet intersection(BitSet a, BitSet b) {
         BitSet clone;
         BitSet and;
         if (a.size() < b.size()) {
@@ -429,7 +429,6 @@ public class KAPMiner {
 
                 es.execute(new RuleExtractor(currentLevel, itemPositionMap , noTransactions, i, level));
 
-
             }
             es.shutdown();
             do{
@@ -482,7 +481,7 @@ public class KAPMiner {
         return beforeIntersection;
     }
 
-    private static synchronized ItemSet mergeAntecedents(List<RuleWithTransactions> consequents, int size) {
+    private static  ItemSet mergeAntecedents(List<RuleWithTransactions> consequents, int size) {
         int[] union = new int[size + 1];
         Arrays.fill(union, Integer.MAX_VALUE);
         for (int i = 0; i < size; i++) {
@@ -498,7 +497,7 @@ public class KAPMiner {
         return new ItemSet(union);
     }
 
-    private static synchronized ItemSet mergeConsequents(List<RuleWithTransactions> antecedents, int size) {
+    private static  ItemSet mergeConsequents(List<RuleWithTransactions> antecedents, int size) {
         int[] union = new int[size + 1];
         // Arrays.fill(union, Integer.MAX_VALUE);
         for (int i = 0; i < size; i++) {
@@ -636,22 +635,34 @@ public class KAPMiner {
     }
 
 
-    private static synchronized void addSupport(ItemSet newItemSet, double support){
-        supports.put(newItemSet,support);
-    }
-    private static synchronized void addRuleToCurrentLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
-        currentLevelMap.put(newItemSet, rules);
-    }
-    private static synchronized void addRulePrevLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
-        prevLevelMap.put(newItemSet, rules);
-    }
-    private static synchronized void addToNextLevel(ItemsetWithTransactions itemsetWithTransactions){
+    private static  void addSupport(ItemSet newItemSet, double support){
+        synchronized(supports){
+            supports.put(newItemSet,support);
+        }
 
-        nextLevel.add(itemsetWithTransactions);
     }
-    private static synchronized void addToOutputRules(Rule rule){
+    private static void addRuleToCurrentLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
+        synchronized(currentLevelMap){
+            currentLevelMap.put(newItemSet, rules);
+        }
 
-        outputRules.add(rule);
+    }
+    private static  void addRulePrevLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
+        synchronized(prevLevelMap){
+            prevLevelMap.put(newItemSet, rules);
+        }
+
+    }
+    private static  void addToNextLevel(ItemsetWithTransactions itemsetWithTransactions){
+        synchronized(nextLevel){
+            nextLevel.add(itemsetWithTransactions);
+        }
+
+    }
+    private static void addToOutputRules(Rule rule){
+        synchronized(outputRules){
+            outputRules.add(rule);
+        }
     }
 
     //------------------------INNER-CLASS------------------------------
