@@ -27,7 +27,7 @@ public class KAPMiner {
     private static Map<ItemSet, List<RuleWithTransactions>> currentLevelMap , prevLevelMap ;
     private static List<ItemsetWithTransactions> nextLevel;
     private static List<Rule> outputRules;
-
+    private static Map<Integer, List<ItemsetWithTransactions>> nextLevelMap;
 
 
 
@@ -405,7 +405,7 @@ public class KAPMiner {
         //Behöver skickas med till tråd
         outputRules = new ArrayList<>();
         nextLevel = new ArrayList<>();
-
+        nextLevelMap = new HashMap<>();
         currentLevelMap = new HashMap<>();
         prevLevelMap = new HashMap<>();
 /**
@@ -424,25 +424,23 @@ public class KAPMiner {
         while (true) {
             //For-loopen kan eventuellt parallelliseras
             ExecutorService es = Executors.newCachedThreadPool();
-
+            nextLevelMap.clear();
             //Rule extraction
             for (int i = 0; i < currentLevel.size(); i++) {
 
                 es.execute(new RuleExtractor(currentLevel, itemPositionMap , noTransactions, i, level));
-
             }
             es.shutdown();
             do{
                 try{
                     finished = es.awaitTermination(1000, TimeUnit.MILLISECONDS);
                 }catch(InterruptedException ie){
-
+                    System.err.println(ie.getMessage());
                 }
             }
             while(!finished);
             finished = false;
-
-
+            nextLevel = nextLevelMapToList();
 
             if (!nextLevel.isEmpty()) {
                 // levels.add(nextLevel);
@@ -666,6 +664,39 @@ public class KAPMiner {
         }
     }
 
+
+    private static void addToNextLevelMap(int threadNum, ItemsetWithTransactions itemsetWithTransactions){
+        synchronized(nextLevelMap){
+            if(nextLevelMap != null){
+                if(!nextLevelMap.containsKey(threadNum)){
+                    nextLevelMap.put(threadNum, new ArrayList<>());
+                    nextLevelMap.get(threadNum).add(itemsetWithTransactions);
+                }else{
+                    nextLevelMap.get(threadNum).add(itemsetWithTransactions);
+                }
+            }
+        }
+
+    }
+    private static String nextLevelMapToString(){
+        StringBuilder sb = new StringBuilder();
+
+        for(Integer i : nextLevelMap.keySet()){
+            sb.append(nextLevelMap.get(i));
+        }
+        return sb.toString();
+    }
+    private static ArrayList<ItemsetWithTransactions> nextLevelMapToList(){
+        ArrayList<ItemsetWithTransactions> tempList = new ArrayList<>();
+        if(!nextLevelMap.isEmpty()){
+            for(Integer i : nextLevelMap.keySet()){
+                tempList.addAll(nextLevelMap.get(i));
+            }
+        }
+        return tempList;
+    }
+
+
     //------------------------INNER-CLASS------------------------------
     private static class RuleExtractor implements Runnable{
         private List<ItemsetWithTransactions> currentLevel;
@@ -722,12 +753,15 @@ public class KAPMiner {
                         extractRulesOnFirstLevel(iItem, jItem);
                     }
 
-                    addToNextLevel(new ItemsetWithTransactions(newItemSet, intersectingTransactions));
+                    //addToNextLevel(new ItemsetWithTransactions(newItemSet, intersectingTransactions));
+                    addToNextLevelMap(i,new ItemsetWithTransactions(newItemSet, intersectingTransactions));
                     addRuleToCurrentLevelMap(newItemSet, rules);
                 } else {
                     break;
+
                 }
             }
+
         }
         private void extractRules(ItemSet newItemSet, List<RuleWithTransactions> matches){
             int[] tmpItemSet = new int[newItemSet.size() - 1];
@@ -738,7 +772,6 @@ public class KAPMiner {
                         tmpItemSet[tmpCnt++] = newItemSet.get(l);
                     }
                 }
-
                 List<RuleWithTransactions> ruleWithTransactions = prevLevelMap.get(new ItemSet(tmpItemSet));
                 if (ruleWithTransactions != null) {
                     matches.addAll(ruleWithTransactions);
