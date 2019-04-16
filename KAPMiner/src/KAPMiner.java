@@ -404,16 +404,39 @@ public class KAPMiner {
 
 
         //Detta kanske kan trådas också.
-        currentLevelTransactionMap.put(0, new ArrayList<ItemsetWithTransactions>());
-        for (Map.Entry<Integer, BitSet> kv : transactionInput.getItemSets().entrySet()) {
-            if (kv.getValue().cardinality() / noTransactions >= minSup) {
-                ItemSet item = new ItemSet(new int[] {kv.getKey()});
-                currentLevelTransactionMap.get(0).add(new ItemsetWithTransactions(item, kv.getValue()));
-                supports.put(item, kv.getValue().cardinality() / noTransactions);
+        int numOfPartitions = 4;
+        boolean finished = false;
+        ExecutorService es;
+        if(transactionInput.getItemSets().size() > 1000){
+            es = Executors.newCachedThreadPool();
+            int[] partitions = partitionTransactionInput(numOfPartitions,transactionInput.getItemSets().size());
+            for(int i = 0; i < numOfPartitions-1; i++){
+              es.execute(new InitialRuleSupportExtractor(i,partitions[i], partitions[i+1] , transactionInput));
+            }
+            es.execute(new InitialRuleSupportExtractor(numOfPartitions-1,partitions[numOfPartitions-1], transactionInput.getItemSets().size(), transactionInput));
+
+            es.shutdown();
+            do{
+                try{
+                    finished = es.awaitTermination(1000, TimeUnit.MILLISECONDS);
+                }catch(InterruptedException ie){
+                    System.err.println(ie.getMessage());
+                }
+            }
+            while(!finished);
+        }else{
+            for (Map.Entry<Integer, BitSet> kv : transactionInput.getItemSets().entrySet()) {
+                if (kv.getValue().cardinality() / noTransactions >= minSup) {
+                    ItemSet item = new ItemSet(new int[] {kv.getKey()});
+                    addToNextLevelMap(0,new ItemsetWithTransactions(item, kv.getValue()));
+                    supports.put(item, kv.getValue().cardinality() / noTransactions);
+                }
             }
         }
 
 
+
+        prepareForNextLevel();
 
 
 /**
@@ -428,13 +451,13 @@ public class KAPMiner {
  * Algoritm börjar här
  */
         int level = 1;
-        boolean finished = false;
+        finished = false;
         while (true) {
             //For-loopen kan eventuellt parallelliseras
-            ExecutorService es = Executors.newCachedThreadPool();
+            es = Executors.newCachedThreadPool();
             //Rule extraction
             int threadName = 0;
-            System.out.println(mapTransactionToString(currentLevelTransactionMap));
+            //System.out.println(mapTransactionToString(currentLevelTransactionMap));
             for (int row = 0; row < currentLevelTransactionMap.size(); row++) {
 
                 for(int col = 0; currentLevelTransactionMap.containsKey(row) && col < currentLevelTransactionMap.get(row).size(); col++) {
@@ -462,6 +485,25 @@ public class KAPMiner {
             }
         }
         return outputRules;
+    }
+
+    /**
+     *
+     * @param inputSize
+     * @return int[] with partition starting indexes where the last index is the partition size.
+     */
+    private static int[] partitionTransactionInput(int numOfPartitions, int inputSize){
+
+        /*while(inputSize%numOfPartitions != 0){
+            numOfPartitions++;
+        }*/
+        int[] temp = new int[numOfPartitions];
+        int partition = inputSize/numOfPartitions;
+        for(int i = 0; i < numOfPartitions; i++){
+            temp[i] = partition*(i);
+        }
+
+        return temp;
     }
 
 
@@ -655,15 +697,13 @@ public class KAPMiner {
 
 
     private static  void addSupport(ItemSet newItemSet, double support){
-        synchronized(supports){
-            supports.put(newItemSet,support);
-        }
+
+        supports.put(newItemSet,support);
+
 
     }
     private static void addRuleToCurrentLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
-        synchronized(currentLevelMap){
-            currentLevelMap.put(newItemSet, rules);
-        }
+        currentLevelMap.put(newItemSet, rules);
     }
     private static  void addRulePrevLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
         synchronized(prevLevelMap){
@@ -685,18 +725,16 @@ public class KAPMiner {
 
 
     private static void addToNextLevelMap(int threadNum, ItemsetWithTransactions itemsetWithTransactions){
-        synchronized(nextLevelTransactionMap){
-            if(nextLevelTransactionMap != null){
-                if(!nextLevelTransactionMap.containsKey(threadNum)){
-                    nextLevelTransactionMap.put(threadNum, new ArrayList<>());
-                    nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
-                    System.out.println("Thread: " +threadNum + " itemsetWithTransactions" + itemsetWithTransactions);
-                }else{
-                    System.out.println("Thread: " +threadNum + " itemsetWithTransactions" + itemsetWithTransactions);
-                    nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
-                }
+
+        if(nextLevelTransactionMap != null){
+            if(!nextLevelTransactionMap.containsKey(threadNum)){
+                nextLevelTransactionMap.put(threadNum, new ArrayList<>());
+                nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
+            }else{
+                nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
             }
         }
+
 
     }
     private static String mapTransactionToString(Map<Integer, List<ItemsetWithTransactions>> map){
@@ -960,4 +998,38 @@ public class KAPMiner {
 
     }
 
+
+    private static class InitialRuleSupportExtractor implements Runnable{
+        private int firstElement, lastElement;
+        private static TransactionInput transactionInput;
+        private int threadName;
+        //----------------------------------------CONSTRUCTOR----------------------------------------------------
+        public InitialRuleSupportExtractor(int threadName, int firstElement, int lastElement , TransactionInput transactionInput){
+            this.threadName = threadName;
+            this.firstElement = firstElement;
+            this.lastElement = lastElement;
+            if(this.transactionInput == null){
+                this.transactionInput = transactionInput;
+            }
+        }
+        //----------------------------------------METHODS--------------------------------------------------------
+
+
+        @Override
+        public void run(){
+            int currentKey = firstElement;
+            double noTransactions = transactionInput.getTransactions();
+            while(currentKey < lastElement){
+                if(transactionInput.getItemSets().containsKey(currentKey)){
+                    BitSet bitSet = transactionInput.getItemSets().get(currentKey);
+                    if (bitSet.cardinality() / noTransactions >= minSup) {
+                        ItemSet item = new ItemSet(new int[]{currentKey});
+                        addToNextLevelMap(threadName, new ItemsetWithTransactions(item, bitSet));
+                        addSupport(item, bitSet.cardinality() / noTransactions);
+                    }
+                }
+                currentKey++;
+            }
+        }
+    }
 }
