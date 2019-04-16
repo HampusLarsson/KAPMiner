@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -385,10 +386,10 @@ public class KAPMiner {
 
     private static List<Rule> findFrequent(TransactionInput transactionInput) {
         //Behöver skickas med till tråd
-        supports = new HashMap<>();
+        supports = new ConcurrentHashMap<>();
         outputRules = new ArrayList<>();
         nextLevel = new ArrayList<>();
-        nextLevelTransactionMap = new HashMap<>();
+        nextLevelTransactionMap = new ConcurrentHashMap<>();
         currentLevelTransactionMap = new HashMap<>();
         currentLevelMap = new HashMap<>();
         prevLevelMap = new HashMap<>();
@@ -700,8 +701,8 @@ public class KAPMiner {
 
         supports.put(newItemSet,support);
 
-
     }
+
     private static void addRuleToCurrentLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
         currentLevelMap.put(newItemSet, rules);
     }
@@ -728,8 +729,11 @@ public class KAPMiner {
 
         if(nextLevelTransactionMap != null){
             if(!nextLevelTransactionMap.containsKey(threadNum)){
-                nextLevelTransactionMap.put(threadNum, new ArrayList<>());
-                nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
+                synchronized (nextLevelTransactionMap){
+                    nextLevelTransactionMap.put(threadNum, new ArrayList<>());
+                    nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
+                }
+
             }else{
                 nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
             }
