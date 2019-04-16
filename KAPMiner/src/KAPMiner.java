@@ -27,7 +27,7 @@ public class KAPMiner {
     private static Map<ItemSet, List<RuleWithTransactions>> currentLevelMap , prevLevelMap ;
     private static List<ItemsetWithTransactions> nextLevel;
     private static List<Rule> outputRules;
-    private static Map<Integer, List<ItemsetWithTransactions>> nextLevelMap;
+    private static Map<Integer, List<ItemsetWithTransactions>> nextLevelTransactionMap, currentLevelTransactionMap;
 
 
 
@@ -384,8 +384,14 @@ public class KAPMiner {
     }
 
     private static List<Rule> findFrequent(TransactionInput transactionInput) {
-        //Supports behöver skickas med
+        //Behöver skickas med till tråd
         supports = new HashMap<>();
+        outputRules = new ArrayList<>();
+        nextLevel = new ArrayList<>();
+        nextLevelTransactionMap = new HashMap<>();
+        currentLevelTransactionMap = new HashMap<>();
+        currentLevelMap = new HashMap<>();
+        prevLevelMap = new HashMap<>();
 
         //intemPositionMap behövs skickas med
         IntObjectMap<ItemPosition> itemPositionMap = transactionInput.itemPositions;
@@ -393,21 +399,23 @@ public class KAPMiner {
         double noTransactions = transactionInput.getTransactions();
 
         //currentLevel behöver skickas med
+
         List<ItemsetWithTransactions> currentLevel = new ArrayList<>();
+
+
+        //Detta kanske kan trådas också.
+        currentLevelTransactionMap.put(0, new ArrayList<ItemsetWithTransactions>());
         for (Map.Entry<Integer, BitSet> kv : transactionInput.getItemSets().entrySet()) {
             if (kv.getValue().cardinality() / noTransactions >= minSup) {
                 ItemSet item = new ItemSet(new int[] {kv.getKey()});
-                currentLevel.add(new ItemsetWithTransactions(item, kv.getValue()));
+                currentLevelTransactionMap.get(0).add(new ItemsetWithTransactions(item, kv.getValue()));
                 supports.put(item, kv.getValue().cardinality() / noTransactions);
             }
         }
 
-        //Behöver skickas med till tråd
-        outputRules = new ArrayList<>();
-        nextLevel = new ArrayList<>();
-        nextLevelMap = new HashMap<>();
-        currentLevelMap = new HashMap<>();
-        prevLevelMap = new HashMap<>();
+
+
+
 /**
  *
  *
@@ -424,11 +432,16 @@ public class KAPMiner {
         while (true) {
             //For-loopen kan eventuellt parallelliseras
             ExecutorService es = Executors.newCachedThreadPool();
-            nextLevelMap.clear();
             //Rule extraction
-            for (int i = 0; i < currentLevel.size(); i++) {
+            int threadName = 0;
+            System.out.println(mapTransactionToString(currentLevelTransactionMap));
+            for (int row = 0; row < currentLevelTransactionMap.size(); row++) {
 
-                es.execute(new RuleExtractor(currentLevel, itemPositionMap , noTransactions, i, level));
+                for(int col = 0; currentLevelTransactionMap.containsKey(row) && col < currentLevelTransactionMap.get(row).size(); col++) {
+                    //System.out.println("LEVEL: " + level + " size " + currentLevelTransactionMap.size() + " col: " + col + " row: " + row);
+                    es.execute(new RuleExtractor(itemPositionMap, noTransactions, new int[]{row,col} , level, threadName++));
+                    //System.out.println("LEVEL: " + level + " THREAD " + threadName + " COUNT: " + Thread.activeCount() + " ROW: " + row +  " COL SIZE " + currentLevelTransactionMap.get(row).size() );
+                }
             }
             es.shutdown();
             do{
@@ -440,26 +453,33 @@ public class KAPMiner {
             }
             while(!finished);
             finished = false;
-            nextLevel = nextLevelMapToList();
 
-            if (!nextLevel.isEmpty()) {
-                // levels.add(nextLevel);
-                currentLevel.clear();
-                List<ItemsetWithTransactions> tmp = currentLevel;
-                currentLevel = nextLevel;
-                nextLevel = tmp;
-
-                prevLevelMap.clear();
-                Map<ItemSet, List<RuleWithTransactions>> tmpMap = prevLevelMap;
-                prevLevelMap = currentLevelMap;
-                currentLevelMap = tmpMap;
-
+            if (!nextLevelTransactionMap.isEmpty()) {
+                prepareForNextLevel();
                 level += 1;
             } else {
                 break;
             }
         }
         return outputRules;
+    }
+
+
+    private static void prepareForNextLevel(){
+
+        //Håller itemsets och de transaktioner dessa är närvarande startingIndex.
+
+        currentLevelTransactionMap.clear();
+        Map<Integer, List<ItemsetWithTransactions>> temp = currentLevelTransactionMap;
+        currentLevelTransactionMap = nextLevelTransactionMap;
+        nextLevelTransactionMap = temp;
+
+        //Håller nuvarande nivås regler X -> Y, mappat mot ett itemset X U Y
+        prevLevelMap.clear();
+        Map<ItemSet, List<RuleWithTransactions>> tmpMap = prevLevelMap;
+        prevLevelMap = currentLevelMap;
+        currentLevelMap = tmpMap;
+
     }
 
     private static BitSet itemIntersect(int orderConstraint,
@@ -474,7 +494,7 @@ public class KAPMiner {
                 beforeIntersection.set(transactionId);
             }
             if (transactionId == Integer.MAX_VALUE) {
-                break; // or (i+1) would overflow
+                break; // or (startingIndex+1) would overflow
             }
         }
         return beforeIntersection;
@@ -644,7 +664,6 @@ public class KAPMiner {
         synchronized(currentLevelMap){
             currentLevelMap.put(newItemSet, rules);
         }
-
     }
     private static  void addRulePrevLevelMap(ItemSet newItemSet, List<RuleWithTransactions> rules){
         synchronized(prevLevelMap){
@@ -666,31 +685,38 @@ public class KAPMiner {
 
 
     private static void addToNextLevelMap(int threadNum, ItemsetWithTransactions itemsetWithTransactions){
-        synchronized(nextLevelMap){
-            if(nextLevelMap != null){
-                if(!nextLevelMap.containsKey(threadNum)){
-                    nextLevelMap.put(threadNum, new ArrayList<>());
-                    nextLevelMap.get(threadNum).add(itemsetWithTransactions);
+        synchronized(nextLevelTransactionMap){
+            if(nextLevelTransactionMap != null){
+                if(!nextLevelTransactionMap.containsKey(threadNum)){
+                    nextLevelTransactionMap.put(threadNum, new ArrayList<>());
+                    nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
+                    System.out.println("Thread: " +threadNum + " itemsetWithTransactions" + itemsetWithTransactions);
                 }else{
-                    nextLevelMap.get(threadNum).add(itemsetWithTransactions);
+                    System.out.println("Thread: " +threadNum + " itemsetWithTransactions" + itemsetWithTransactions);
+                    nextLevelTransactionMap.get(threadNum).add(itemsetWithTransactions);
                 }
             }
         }
 
     }
-    private static String nextLevelMapToString(){
+    private static String mapTransactionToString(Map<Integer, List<ItemsetWithTransactions>> map){
         StringBuilder sb = new StringBuilder();
 
-        for(Integer i : nextLevelMap.keySet()){
-            sb.append(nextLevelMap.get(i));
+        for(Integer i : map.keySet()){
+            sb.append(map.get(i) + "\n");
         }
         return sb.toString();
     }
+
+
+
+
+
     private static ArrayList<ItemsetWithTransactions> nextLevelMapToList(){
         ArrayList<ItemsetWithTransactions> tempList = new ArrayList<>();
-        if(!nextLevelMap.isEmpty()){
-            for(Integer i : nextLevelMap.keySet()){
-                tempList.addAll(nextLevelMap.get(i));
+        if(!nextLevelTransactionMap.isEmpty()){
+            for(Integer i : nextLevelTransactionMap.keySet()){
+                tempList.addAll(nextLevelTransactionMap.get(i));
             }
         }
         return tempList;
@@ -699,20 +725,19 @@ public class KAPMiner {
 
     //------------------------INNER-CLASS------------------------------
     private static class RuleExtractor implements Runnable{
-        private List<ItemsetWithTransactions> currentLevel;
         private double noTransactions;
         private BitSet intersectingTransactions;
         private List<RuleWithTransactions> rules;
-        private int i, level;
+        private int level, threadName;
+        private int[] startingIndex;
         private IntObjectMap<ItemPosition> itemPositionMap;
         //--------------------------------CONSTRUCTORS-----------------------------------
-        //int i bör döpas om för tydlighetens skull
-        public RuleExtractor(List<ItemsetWithTransactions> currentLevel, IntObjectMap<ItemPosition> itemPositionMap ,
-                             double noTransactions, int i, int level){
-            this.i = i;
+        //int startingIndex bör döpas om för tydlighetens skull
+        public RuleExtractor(IntObjectMap<ItemPosition> itemPositionMap ,
+                             double noTransactions, int[] startingIndex, int level, int threadName){
+            this.threadName = threadName;
+            this.startingIndex = startingIndex;
             this.level = level;
-
-            this.currentLevel = currentLevel;
             this.noTransactions = noTransactions;
             this.itemPositionMap = itemPositionMap;
 
@@ -720,51 +745,65 @@ public class KAPMiner {
         //--------------------------------METHODS----------------------------------------
         @Override
         public void run(){
-            for (int j = i + 1; j < currentLevel.size(); j++) {
-                List<RuleWithTransactions> matches = new ArrayList<>();
-                ItemsetWithTransactions iItem = currentLevel.get(i);
-                ItemsetWithTransactions jItem = currentLevel.get(j);
-
-                if (iItem.getItemSet().prefixMatch(jItem.getItemSet(), level - 1)) {
-                    //intersection metoden kan behöva synkas
-                    intersectingTransactions =
-                            intersection(iItem.getTransactions(), jItem.getTransactions());
-                    if (minSup >= intersectingTransactions.cardinality() / noTransactions)
-                        continue;
-
-                    //Merge behöver synkas
-                    double itemsetSup = intersectingTransactions.cardinality() / noTransactions;
-                    ItemSet newItemSet = iItem.getItemSet().merge(jItem.getItemSet(), level - 1);
-                    addSupport(newItemSet, itemsetSup);
-
-                    matches.clear();
-                    List<RuleWithTransactions> iItemRules = prevLevelMap.get(iItem.getItemSet());
-                    if (iItemRules != null) {
-                        matches.addAll(iItemRules);
-                    }
-                    List<RuleWithTransactions> jItemRules = prevLevelMap.get(jItem.getItemSet());
-                    if (jItemRules != null) {
-                        matches.addAll(jItemRules);
-                    }
-                    rules = new ArrayList<>();
-                    if (level > 1) {
-                        extractRules(newItemSet, matches);
-                    } else {
-                        extractRulesOnFirstLevel(iItem, jItem);
-                    }
-
-                    //addToNextLevel(new ItemsetWithTransactions(newItemSet, intersectingTransactions));
-                    addToNextLevelMap(i,new ItemsetWithTransactions(newItemSet, intersectingTransactions));
-                    addRuleToCurrentLevelMap(newItemSet, rules);
-                } else {
-                    break;
-
+            int col = startingIndex[1] + 1;
+            for(int row = startingIndex[0]; row < currentLevelTransactionMap.size(); row++) {
+                try{
+                    //System.out.println("row " + row + " COL: "  + col + " ROW-size:" + currentLevelTransactionMap.get(row).size());
+                }catch(NullPointerException e){
+                    //System.out.println("ERROR row " + row +" col: " + col + " size: " + currentLevelTransactionMap.size()  + " THREAD: " + threadName + " LEVEL " + level + " STARTPOS: " + Arrays.toString(startingIndex) + " OBJ: " + currentLevelTransactionMap.get(row) + " KEYSET: " + currentLevelTransactionMap.keySet());
                 }
+                for ( ; currentLevelTransactionMap.containsKey(row) &&col < currentLevelTransactionMap.get(row).size(); col++) {
+
+                    List<RuleWithTransactions> matches = new ArrayList<>();
+                    ItemsetWithTransactions iItem = currentLevelTransactionMap.get(startingIndex[0]).get(startingIndex[1]);
+                    ItemsetWithTransactions jItem = currentLevelTransactionMap.get(row).get(col);
+
+                    if (iItem.getItemSet().prefixMatch(jItem.getItemSet(), level - 1)) {
+                        //intersection metoden kan behöva synkas
+                        intersectingTransactions =
+                                intersection(iItem.getTransactions(), jItem.getTransactions());
+                        if (minSup >= intersectingTransactions.cardinality() / noTransactions)
+                            continue;
+
+                        //Merge behöver synkas
+                        double itemsetSup = intersectingTransactions.cardinality() / noTransactions;
+                        ItemSet newItemSet = iItem.getItemSet().merge(jItem.getItemSet(), level - 1);
+                        addSupport(newItemSet, itemsetSup);
+
+                        matches.clear();
+                        List<RuleWithTransactions> iItemRules = prevLevelMap.get(iItem.getItemSet());
+                        if (iItemRules != null) {
+                            matches.addAll(iItemRules);
+                        }
+                        List<RuleWithTransactions> jItemRules = prevLevelMap.get(jItem.getItemSet());
+                        if (jItemRules != null) {
+                            matches.addAll(jItemRules);
+                        }
+                        rules = new ArrayList<>();
+                        if (level > 1) {
+                            extractRules(newItemSet, matches);
+                        } else {
+                            extractRulesOnFirstLevel(iItem, jItem);
+                        }
+
+                        addToNextLevelMap(threadName, new ItemsetWithTransactions(newItemSet, intersectingTransactions));
+                        addRuleToCurrentLevelMap(newItemSet, rules);
+                    } else {
+
+                        //DETTA KAN VARA ETT PROBLEM
+                        break;
+
+                    }
+                }
+                col = 0;
             }
+
 
         }
         private void extractRules(ItemSet newItemSet, List<RuleWithTransactions> matches){
             int[] tmpItemSet = new int[newItemSet.size() - 1];
+
+            // varför minus 3
             for (int k = newItemSet.size() - 3; k >= 0; k--) {
                 int tmpCnt = 0;
                 for (int l = 0; l < newItemSet.size(); l++) {
@@ -893,6 +932,7 @@ public class KAPMiner {
                         intersectingTransactions, itemA, itemB);
 
                 double ruleSup = beforeIntersection.cardinality() / noTransactions;
+
                 if (ruleSup >= minSup) {
                     double supportRatio = beforeIntersection.cardinality()
                             / (double) intersectingTransactions.cardinality();
@@ -901,6 +941,8 @@ public class KAPMiner {
                             / (supports.get(kOrder.getItemSet()) * supports.get(mOrder.getItemSet()));
                     RuleWithTransactions rule = new RuleWithTransactions(kOrder.getItemSet(),
                             mOrder.getItemSet(), beforeIntersection, ruleSup, supportRatio, ORconf, lift);
+
+
                     rules.add(rule);
                     if (Precision.compareTo(rule.getORconf(), minConf, 0.0001) >= 0
                             && supportRatio >= minSupRatio) {
